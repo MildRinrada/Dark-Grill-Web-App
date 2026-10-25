@@ -1,0 +1,9 @@
+{
+  "name": "Dark Grill",
+  "short_name": "Dark Grill",
+  "start_url": "/menu",
+  "display": "standalone",
+  "background_color": "#0E0E0F",
+  "theme_color": "#0E0E0F",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

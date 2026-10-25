@@ -1,0 +1,33 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "darkgrill-api",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-09-01",
+  // no public URL: the web worker calls the `Internal` entrypoint over a service binding
+  "workers_dev": false,
+  "containers": [
+    {
+      "class_name": "ApiContainer",
+      "image": "./Dockerfile",
+      "image_build_context": "../..",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "API_CONTAINER", "class_name": "ApiContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
+  "vars": {
+    // the URL people open; Socket.IO and CORS only accept this origin
+    "WEB_ORIGIN": "https://darkgrill-web.YOUR-SUBDOMAIN.workers.dev",
+    "PROMPTPAY_ID": "0812345678",
+    // true = OTP codes are shown on screen and the mock payment simulator is on (demo only)
+    "DEV_MODE": "true",
+    "S3_BUCKET": "darkgrill-uploads",
+    "S3_ENDPOINT": "https://YOUR-ACCOUNT-ID.r2.cloudflarestorage.com"
+  },
+  // DATABASE_URL, REDIS_URL, JWT_SECRET, JWT_REFRESH_SECRET, PAYMENT_WEBHOOK_SECRET,
+  // S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY are secrets: `npm run cf:secrets`
+  "observability": { "enabled": true }
+}

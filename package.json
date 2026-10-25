@@ -1,0 +1,13 @@
+{
+  "name": "dark-grill",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "setup": "npm run db:up && npm run -w apps/api prisma:migrate && npm run -w apps/api seed",
+    "dev:api": "npm run -w apps/api dev",
+    "dev:web": "npm run -w apps/web dev",
+    "build": "npm run -w apps/api build && npm run -w apps/web build"
+  }
+}

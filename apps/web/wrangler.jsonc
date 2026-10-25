@@ -1,0 +1,20 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "darkgrill-web",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "services": [
+    // OpenNext calls itself for some cache and revalidation paths
+    { "binding": "WORKER_SELF_REFERENCE", "service": "darkgrill-web" },
+    // the API worker (apps/api/wrangler.jsonc), reached through its internal entrypoint
+    { "binding": "API", "service": "darkgrill-api", "entrypoint": "Internal" }
+  ],
+  "images": { "binding": "IMAGES" },
+  "vars": {
+    // empty = server components use the API binding instead of a URL (lib/server-api.ts)
+    "API_INTERNAL_URL": ""
+  },
+  "observability": { "enabled": true }
+}

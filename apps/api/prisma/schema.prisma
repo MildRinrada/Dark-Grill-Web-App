@@ -1,0 +1,510 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// All money is stored as integer satang (1 THB = 100 satang).
+
+enum Role {
+  CUSTOMER
+  OWNER
+  MANAGER
+  CASHIER
+  KITCHEN
+  RIDER
+}
+
+enum Channel {
+  WEB
+  LINE
+  QR
+  KIOSK
+}
+
+enum FulfillmentType {
+  DELIVERY
+  PICKUP
+  DINE_IN
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  EXPIRED
+  PAID
+  CANCELLED
+  ACCEPTED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  COMPLETED
+}
+
+enum PaymentMethod {
+  PROMPTPAY
+  CARD
+  CASH
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+enum PromoType {
+  PERCENT
+  FIXED
+  FREE_DELIVERY
+}
+
+enum CampaignType {
+  HAPPY_HOUR
+  BUY_X_GET_Y
+  FLASH_SALE
+}
+
+enum IngredientKind {
+  BUN
+  PATTY
+  CHEESE
+  VEG
+  SAUCE
+  EXTRA
+  OTHER
+}
+
+enum StockReason {
+  SALE
+  RECEIVE
+  WASTE
+  ADJUST
+  REFUND
+}
+
+enum LoyaltyReason {
+  EARN
+  REDEEM
+  BIRTHDAY
+  MISSION
+  REVERSAL
+}
+
+model User {
+  id            String         @id @default(cuid())
+  phone         String?        @unique
+  lineUserId    String?        @unique
+  name          String?
+  role          Role           @default(CUSTOMER)
+  birthday      DateTime?
+  createdAt     DateTime       @default(now())
+  staffBranchId String?
+  staffBranch   Branch?        @relation(fields: [staffBranchId], references: [id])
+  addresses     Address[]
+  orders        Order[]
+  carts         Cart[]
+  loyalty       LoyaltyLedger[]
+  reviews       Review[]
+  refreshTokens RefreshToken[]
+  promotions    Promotion[]
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model Address {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String
+  line1     String
+  lat       Float
+  lng       Float
+  note      String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Branch {
+  id                 String              @id
+  slug               String              @unique
+  name               String
+  address            String
+  lat                Float
+  lng                Float
+  opensAt            String // "10:00"
+  closesAt           String // "22:00"
+  baseDeliverySatang Int
+  perKmSatang        Int
+  deliveryRadiusKm   Float
+  kitchenStaff       Int                 @default(3)
+  isActive           Boolean             @default(true)
+  availability       MenuAvailability[]
+  stock              BranchIngredient[]
+  orders             Order[]
+  carts              Cart[]
+  staff              User[]
+  stockMovements     StockMovement[]
+}
+
+model Category {
+  id     String     @id
+  slug   String     @unique
+  name   String
+  nameEn String
+  icon   String
+  sort   Int
+  kind   String // BURGER | SIDE | DRINK | COMBO
+  items  MenuItem[]
+}
+
+model MenuItem {
+  id              String             @id
+  slug            String             @unique
+  categoryId      String
+  category        Category           @relation(fields: [categoryId], references: [id])
+  name            String
+  nameEn          String
+  description     String
+  priceSatang     Int
+  compareAtSatang Int?
+  costSatang      Int
+  imageUrl        String
+  calories        Int
+  allergens       String[]
+  prepMinutes     Int
+  spicyLevel      Int                @default(0)
+  isVegetarian    Boolean            @default(false)
+  isSignature     Boolean            @default(false)
+  isArchived      Boolean            @default(false)
+  sort            Int                @default(0)
+  aliases         String[] // used by the Thai text-to-cart parser
+  optionGroups    OptionGroup[]
+  availability    MenuAvailability[]
+  recipe          RecipeLine[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model MenuAvailability {
+  branchId    String
+  menuItemId  String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  isAvailable Boolean  @default(true)
+  // true when the stock engine (not a person) switched the item off
+  autoDisabled Boolean @default(false)
+
+  @@id([branchId, menuItemId])
+}
+
+model OptionGroup {
+  id         String     @id @default(cuid())
+  menuItemId String
+  menuItem   MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  name       String
+  minSelect  Int        @default(0)
+  maxSelect  Int        @default(1)
+  sort       Int        @default(0)
+  options    Option[]
+}
+
+model Option {
+  id               String      @id @default(cuid())
+  groupId          String
+  group            OptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name             String
+  priceDeltaSatang Int         @default(0)
+  caloriesDelta    Int         @default(0)
+  isDefault        Boolean     @default(false)
+  // optional stock effect: extra cheese consumes cheese, "no onion" saves onion
+  ingredientId     String?
+  ingredient       Ingredient? @relation(fields: [ingredientId], references: [id])
+  ingredientQty    Float       @default(0)
+  sort             Int         @default(0)
+}
+
+model Ingredient {
+  id                 String             @id
+  name               String
+  nameEn             String
+  unit               String
+  kind               IngredientKind
+  costPerUnitSatang  Int
+  // build-your-burger fields
+  isBuilder          Boolean            @default(false)
+  builderPriceSatang Int                @default(0)
+  builderCalories    Int                @default(0)
+  builderColor       String?
+  builderShape       String? // bun-top | bun-bottom | patty | cheese | leaf | slice | sauce | strip | ring
+  builderSort        Int                @default(0)
+  recipeLines        RecipeLine[]
+  stock              BranchIngredient[]
+  movements          StockMovement[]
+  options            Option[]
+}
+
+model BranchIngredient {
+  branchId     String
+  ingredientId String
+  branch       Branch     @relation(fields: [branchId], references: [id])
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  quantity     Float
+  reorderPoint Float
+
+  @@id([branchId, ingredientId])
+}
+
+model RecipeLine {
+  menuItemId   String
+  ingredientId String
+  menuItem     MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  qty          Float
+
+  @@id([menuItemId, ingredientId])
+}
+
+model StockMovement {
+  id           String      @id @default(cuid())
+  branchId     String
+  branch       Branch      @relation(fields: [branchId], references: [id])
+  ingredientId String
+  ingredient   Ingredient  @relation(fields: [ingredientId], references: [id])
+  delta        Float
+  reason       StockReason
+  orderId      String?
+  note         String?
+  actorId      String?
+  createdAt    DateTime    @default(now())
+
+  @@index([branchId, createdAt])
+}
+
+model Cart {
+  id         String     @id @default(cuid())
+  userId     String?
+  user       User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionKey String?    @unique
+  branchId   String
+  branch     Branch     @relation(fields: [branchId], references: [id])
+  channel    Channel    @default(WEB)
+  tableNo    String?
+  promoCode  String?
+  items      CartItem[]
+  updatedAt  DateTime   @updatedAt
+  createdAt  DateTime   @default(now())
+
+  @@index([userId])
+}
+
+model CartItem {
+  id         String   @id @default(cuid())
+  cartId     String
+  cart       Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  menuItemId String?
+  qty        Int
+  optionIds  String[]
+  // build-your-burger: ordered list of ingredient ids, bottom to top
+  layers     String[]
+  note       String?
+  createdAt  DateTime @default(now())
+}
+
+model Order {
+  id                 String             @id @default(cuid())
+  number             String             @unique
+  publicToken        String             @unique
+  userId             String?
+  user               User?              @relation(fields: [userId], references: [id])
+  branchId           String
+  branch             Branch             @relation(fields: [branchId], references: [id])
+  channel            Channel
+  status             OrderStatus
+  fulfillmentType    FulfillmentType
+  tableNo            String?
+  address            Json?
+  scheduledAt        DateTime?
+  note               String?
+  promoCode          String?
+  subtotalSatang     Int
+  discountSatang     Int
+  deliverySatang     Int
+  grandTotalSatang   Int
+  costSatang         Int                @default(0)
+  crownsEarned       Int                @default(0)
+  etaReadyAt         DateTime?
+  etaDeliveredAt     DateTime?
+  stockDeducted      Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  items              OrderItem[]
+  events             OrderStatusEvent[]
+  payments           Payment[]
+  review             Review?
+
+  @@index([branchId, status])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id              String  @id @default(cuid())
+  orderId         String
+  order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId      String?
+  name            String
+  imageUrl        String?
+  qty             Int
+  unitPriceSatang Int
+  lineTotalSatang Int
+  costSatang      Int
+  optionIds       String[]
+  optionNames     String[]
+  layers          String[]
+  note            String?
+}
+
+model OrderStatusEvent {
+  id      String      @id @default(cuid())
+  orderId String
+  order   Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status  OrderStatus
+  actorId String?
+  note    String?
+  at      DateTime    @default(now())
+}
+
+model Payment {
+  id           String        @id @default(cuid())
+  orderId      String
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  method       PaymentMethod
+  status       PaymentStatus @default(PENDING)
+  amountSatang Int
+  provider     String
+  providerRef  String?
+  qrPayload    String?
+  redirectUrl  String?
+  expiresAt    DateTime?
+  paidAt       DateTime?
+  refundedAt   DateTime?
+  createdAt    DateTime      @default(now())
+}
+
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  provider   String
+  eventId    String
+  payload    Json
+  receivedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+}
+
+model IdempotencyRecord {
+  key          String
+  scope        String
+  requestHash  String
+  statusCode   Int
+  responseBody Json
+  createdAt    DateTime @default(now())
+
+  @@id([scope, key])
+}
+
+model Promotion {
+  id                String    @id @default(cuid())
+  code              String    @unique
+  description       String
+  type              PromoType
+  value             Int // percent (PERCENT) or satang (FIXED)
+  minSubtotalSatang Int       @default(0)
+  maxDiscountSatang Int?
+  startsAt          DateTime?
+  endsAt            DateTime?
+  usageLimit        Int?
+  usedCount         Int       @default(0)
+  isActive          Boolean   @default(true)
+  // set for single-use reward codes issued to one customer
+  ownerId           String?
+  owner             User?     @relation(fields: [ownerId], references: [id])
+  createdAt         DateTime  @default(now())
+}
+
+model Campaign {
+  id         String       @id @default(cuid())
+  name       String
+  type       CampaignType
+  // HAPPY_HOUR / FLASH_SALE: { categoryKind?: string, menuItemIds?: string[], percent: number }
+  // BUY_X_GET_Y: { menuItemId: string, buy: number, free: number }
+  config     Json
+  daysOfWeek Int[] // 0 = Sunday; empty means every day
+  startTime  String? // "14:00"
+  endTime    String? // "17:00"
+  startsAt   DateTime?
+  endsAt     DateTime?
+  isActive   Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+}
+
+model Reward {
+  id          String  @id
+  name        String
+  description String
+  costCrowns  Int
+  type        PromoType
+  value       Int
+  isActive    Boolean @default(true)
+}
+
+model LoyaltyLedger {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  delta     Int
+  reason    LoyaltyReason
+  orderId   String?
+  note      String?
+  createdAt DateTime      @default(now())
+
+  @@index([userId])
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  orderId   String   @unique
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  rating    Int
+  comment   String?
+  photoUrl  String?
+  reply     String?
+  repliedAt DateTime?
+  createdAt DateTime @default(now())
+}
