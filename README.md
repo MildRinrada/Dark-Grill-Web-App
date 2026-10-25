@@ -106,6 +106,53 @@ e2e ครอบคลุม: ราคาคิดใหม่ที่ server 
 
 ข้อยกเว้น: `/kiosk` (206 KB) และ `/kitchen` (199 KB) ยังใช้ motion เพราะเป็นอุปกรณ์ในร้านที่โหลดครั้งเดียวแล้วเปิดค้างไว้
 
+## Deploy ขึ้น Cloudflare
+
+```text
+เบราว์เซอร์ ──> darkgrill-web (Worker, Next.js ผ่าน OpenNext)
+                 ├─ หน้าเว็บ, รูปใน public, /_next/image (Images binding)
+                 └─ /api/v1, /uploads, /socket.io ──service binding──> darkgrill-api (Worker)
+                                                                        └─> NestJS ใน Cloudflare Containers (1 instance)
+                                                                             ├─ Postgres: Neon
+                                                                             ├─ Redis: Upstash (BullMQ, Socket.IO adapter, cache)
+                                                                             └─ รูปที่อัปโหลด: R2
+```
+
+ทั้งระบบใช้ URL เดียวคือของ `darkgrill-web` ส่วน API ไม่มี URL สาธารณะ (`workers_dev: false`) webhook ของ payment และ LINE จึงชี้มาที่ `https://<web>/api/v1/webhooks/...`
+
+**สิ่งที่ต้องมี**
+- บัญชี Cloudflare แบบ Workers Paid (5 USD/เดือน) เพราะ Containers ใช้กับแพ็กเกจฟรีไม่ได้ และ Images binding อาจมีค่าใช้จ่ายตามการใช้งาน
+- Postgres ที่ [Neon](https://neon.tech) และ Redis ที่ [Upstash](https://upstash.com) (แพ็กเกจฟรีพอสำหรับเดโม)
+- Docker ในเครื่องที่สั่ง deploy เพราะ wrangler build image ของ API ในเครื่องแล้วค่อยอัปโหลด
+
+**ขั้นตอน** (รันจาก root ของโปรเจกต์ ครั้งแรกให้ `npx wrangler login` ก่อน)
+
+1. เตรียมฐานข้อมูลบน Neon แล้วใส่ข้อมูลตัวอย่าง (ใช้ connection string แบบ direct)
+   ```bash
+   DATABASE_URL="postgresql://..." npm run -w apps/api prisma:deploy
+   DATABASE_URL="postgresql://..." npm run -w apps/api seed
+   ```
+   ถ้าใช้ PowerShell ให้ตั้ง `$env:DATABASE_URL="postgresql://..."` ก่อน แล้วค่อยรันสองคำสั่งนี้
+2. สร้าง bucket สำหรับรูปที่อัปโหลด: `npx wrangler r2 bucket create darkgrill-uploads` แล้วสร้าง R2 API token แบบ Object Read & Write
+3. แก้ `vars` ใน [apps/api/wrangler.jsonc](apps/api/wrangler.jsonc): `WEB_ORIGIN` เป็น `https://darkgrill-web.<subdomain>.workers.dev` (ดู subdomain ได้ในหน้า Workers ของ dashboard) และ `S3_ENDPOINT` เป็น `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
+4. Deploy API ก่อน เพราะเว็บผูก binding ไปหา API
+   ```bash
+   npm run -w apps/api cf:deploy
+   cp apps/api/.env.cloudflare.example apps/api/.env.cloudflare   # กรอกค่าให้ครบ
+   npm run -w apps/api cf:secrets
+   ```
+5. Deploy เว็บ: `npm run -w apps/web cf:deploy`
+
+ครั้งแรกที่เปิดเว็บหลังจาก deploy จะช้ากว่าปกติ เพราะ container ต้องบูตและรัน `prisma migrate deploy` ก่อน หลังจากนั้น container จะหลับเองเมื่อไม่มีคนใช้ 1 ชั่วโมง (`sleepAfter`) ระหว่างที่หลับ งานตั้งเวลาของ BullMQ (ปิดออเดอร์ที่ไม่จ่าย และการแจ้งเตือน) จะรอไว้ แล้วทำต่อทันทีที่ container ตื่น
+
+**ข้อควรรู้**
+- `DEV_MODE` เป็น `"true"` ไว้ เพื่อให้เข้าด้วยบัญชีทดลองได้ (หน้า login แสดง OTP และมีปุ่มจำลองการจ่าย) แต่ใครก็เข้าเป็นเจ้าของร้านได้ ให้ใช้กับเดโมเท่านั้น ถ้าจะใช้งานจริงต้องตั้งเป็น `"false"` และต่อ SMS กับ payment gateway จริงก่อน
+- หน้าเว็บ render ใหม่ทุกครั้งที่มีคนเปิด (ยังไม่มี incremental cache) ส่วน API ยัง cache เมนูไว้ใน Redis 60 วินาที ถ้าต้องการ ISR ที่ edge ให้ดูวิธีเปิด R2 cache ใน [apps/web/open-next.config.ts](apps/web/open-next.config.ts)
+- ใช้ API แค่ instance เดียว (`max_instances: 1`) เพราะ BullMQ worker กับห้อง Socket.IO อยู่ใน process เดียวกัน
+- บน Windows ใช้ `wrangler dev` จำลอง container ไม่ได้ (ต้องใช้ WSL) แต่ deploy ได้ตามปกติ ส่วน `npm run -w apps/web cf:preview` ใช้ได้เมื่อมี worker `darkgrill-api` รันอยู่ด้วย
+- `npm run -w apps/web cf:build` ตั้ง `NEXT_PUBLIC_SOCKET_URL=/` ให้เอง เพื่อให้ Socket.IO ต่อบนโดเมนเดียวกัน ส่วน `next dev` ยังใช้ค่าใน `.env.local` ตามเดิม
+- Dockerfile ที่ [apps/api/Dockerfile](apps/api/Dockerfile) ใช้กับที่อื่นได้ด้วย เช่น Fly.io, Railway หรือ Render
+
 ## สถาปัตยกรรมโดยย่อ
 
 - ทุกช่องทางใช้ API ชุดเดียวที่ `/api/v1` เมนู ราคา และสต็อกจึงตรงกันทุกจอ เว็บเข้าถึง API ผ่าน rewrite แบบ same-origin เพื่อให้ refresh cookie เป็น first-party

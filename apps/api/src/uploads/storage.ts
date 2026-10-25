@@ -17,6 +17,7 @@ const s3 = env.s3.bucket
   ? new S3Client({
       region: 'auto',
       endpoint: env.s3.endpoint,
+      forcePathStyle: true,
       credentials: { accessKeyId: env.s3.accessKeyId, secretAccessKey: env.s3.secretAccessKey },
     })
   : null;
