@@ -3,8 +3,10 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "predev": "node ../../scripts/free-port.mjs 3000",
     "dev": "next dev --port 3000",
     "build": "next build",
+    "prestart": "node ../../scripts/free-port.mjs 3000",
     "start": "next start --port 3000",
     "lint": "tsc --noEmit && tsc --noEmit -p cloudflare",
     "cf:build": "node scripts/cloudflare.mjs build",

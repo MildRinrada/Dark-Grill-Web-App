@@ -6,7 +6,7 @@ import type { Server, Socket } from 'socket.io';
 import { STAFF_ROLES, verifyAccessToken } from '../common/auth';
 import { env } from '../common/env';
 import { PrismaService } from '../common/prisma.service';
-import { RedisService } from '../common/redis.service';
+import { RedisService, watchErrors } from '../common/redis.service';
 
 interface SubscribeBody {
   room: string;
@@ -23,7 +23,7 @@ interface SubscribeBody {
  *  branch:{branch}   menu.availability_changed               every menu screen
  *  admin             order.updated, stock.low                back office
  */
-@WebSocketGateway({ cors: { origin: env.webOrigin, credentials: true } })
+@WebSocketGateway({ cors: { origin: env.webOrigins, credentials: true } })
 export class RealtimeGateway implements OnGatewayInit {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger('Realtime');
@@ -37,6 +37,8 @@ export class RealtimeGateway implements OnGatewayInit {
   afterInit(server: Server) {
     const pub = this.redis.client.duplicate();
     const sub = this.redis.client.duplicate();
+    watchErrors(pub);
+    watchErrors(sub);
     server.adapter(createAdapter(pub, sub));
     this.logger.log('Socket.IO ready with Redis adapter');
   }

@@ -12,7 +12,7 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.setGlobalPrefix('api/v1');
   app.use(cookieParser());
-  app.enableCors({ origin: env.webOrigin, credentials: true });
+  app.enableCors({ origin: env.webOrigins, credentials: true });
   if (usesBucket) app.use('/uploads', serveFromBucket);
   else app.useStaticAssets(UPLOAD_DIR, { prefix: '/uploads', maxAge: '30d' });
   app.enableShutdownHooks();

@@ -9,7 +9,10 @@ const API_URL = process.env.API_INTERNAL_URL;
  * so the API worker never needs a public route.
  */
 export async function apiFetch(path: string, revalidate: number): Promise<Response> {
-  if (API_URL) return fetch(`${API_URL}/api/v1${path}`, { next: { revalidate } });
+  if (API_URL) {
+    const key = process.env.INTERNAL_API_KEY;
+    return fetch(`${API_URL}/api/v1${path}`, { next: { revalidate }, headers: key ? { 'x-internal-key': key } : undefined });
+  }
   const { getCloudflareContext } = await import('@opennextjs/cloudflare');
   const { env } = await getCloudflareContext({ async: true });
   return (env as unknown as { API: { fetch: typeof fetch } }).API.fetch(`https://api.internal/api/v1${path}`);

@@ -2,7 +2,7 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor, SetMetadata
 import { Reflector } from '@nestjs/core';
 import { createHash } from 'crypto';
 import type { Response } from 'express';
-import { from, Observable, of, switchMap, tap } from 'rxjs';
+import { catchError, concatMap, from, Observable, of, switchMap } from 'rxjs';
 import { AppRequest } from './auth';
 import { AppError } from './errors';
 import { PrismaService } from './prisma.service';
@@ -46,17 +46,19 @@ export class IdempotencyInterceptor implements NestInterceptor {
           res.setHeader('Idempotent-Replayed', 'true');
           return of(stored.responseBody);
         }
+        // store the result before the response goes out, so a retry that arrives right after
+        // finds the record instead of the lock
         return next.handle().pipe(
-          tap({
-            next: async (body) => {
-              await this.prisma.idempotencyRecord.create({
-                data: { scope, key, requestHash, statusCode: res.statusCode, responseBody: body as object },
-              });
-              await this.redis.client.del(this.lockKey(scope, key));
-            },
-            error: async () => {
-              await this.redis.client.del(this.lockKey(scope, key));
-            },
+          concatMap(async (body) => {
+            await this.prisma.idempotencyRecord.create({
+              data: { scope, key, requestHash, statusCode: res.statusCode, responseBody: body as object },
+            });
+            await this.redis.client.del(this.lockKey(scope, key));
+            return body;
+          }),
+          catchError(async (err) => {
+            await this.redis.client.del(this.lockKey(scope, key));
+            throw err;
           }),
         );
       }),

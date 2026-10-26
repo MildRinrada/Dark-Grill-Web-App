@@ -1,0 +1,62 @@
+# Render Blueprint for the API when the web app runs on Vercel (README: "Deploy เว็บขึ้น Vercel").
+# Render > New > Blueprint > pick this repo. Everything sits in Singapore, next to Vercel's sin1.
+services:
+  - type: web
+    name: darkgrill-api
+    runtime: docker
+    region: singapore
+    plan: free
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/branches
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: darkgrill-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: darkgrill-redis
+          property: connectionString
+      # the Vercel URL, e.g. https://darkgrill.vercel.app (comma-separate to add more)
+      - key: WEB_ORIGIN
+        sync: false
+      # same value as INTERNAL_API_KEY on Vercel
+      - key: INTERNAL_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: PAYMENT_WEBHOOK_SECRET
+        generateValue: true
+      - key: PROMPTPAY_ID
+        value: "0812345678"
+      # demo only: shows OTP codes on screen and enables the payment simulator
+      - key: DEV_MODE
+        value: "true"
+      # optional: R2 or any S3 bucket, otherwise uploads are lost when the service restarts
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+
+  - type: keyvalue
+    name: darkgrill-redis
+    region: singapore
+    plan: free
+    # BullMQ needs keys to stay put
+    maxmemoryPolicy: noeviction
+    # internal connections only
+    ipAllowList: []
+
+databases:
+  - name: darkgrill-db
+    region: singapore
+    plan: free
+    databaseName: darkgrill

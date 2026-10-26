@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Role } from '@prisma/client';
 import type { Request } from 'express';
+import { timingSafeEqual } from 'crypto';
 import { AppError, forbidden } from './errors';
 import { env } from './env';
 
@@ -86,6 +87,15 @@ export function assertBranchAccess(user: AuthUser, branchId: string) {
 
 /** x-forwarded-for value the Cloudflare edge worker sets on server-side calls from the web app. */
 export const INTERNAL_CLIENT = 'internal';
+
+/** Server-side calls from the web app on other hosts (Vercel) prove themselves with INTERNAL_API_KEY. */
+export function isInternalCall(req: Request): boolean {
+  const sent = req.headers['x-internal-key'];
+  if (!env.internalApiKey || typeof sent !== 'string') return false;
+  const a = Buffer.from(sent);
+  const b = Buffer.from(env.internalApiKey);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 export function clientIp(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];

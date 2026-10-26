@@ -35,7 +35,7 @@ export class PaymentsService {
     });
     const data: Prisma.PaymentUpdateInput = { providerRef: `mp_${payment.id}` };
     if (method === 'PROMPTPAY') data.qrPayload = promptPayPayload(env.promptPayId, order.grandTotalSatang);
-    if (method === 'CARD') data.redirectUrl = `${env.webOrigin}/pay/mock?pid=${payment.id}&t=${order.publicToken}`;
+    if (method === 'CARD') data.redirectUrl = `${env.webOrigins[0]}/pay/mock?pid=${payment.id}&t=${order.publicToken}`;
     return db.payment.update({ where: { id: payment.id }, data });
   }
 

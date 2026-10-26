@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 import { env } from './env';
 import { AppError } from './errors';
@@ -6,6 +6,10 @@ import { AppError } from './errors';
 @Injectable()
 export class RedisService implements OnModuleDestroy {
   readonly client = new Redis(env.redisUrl, { maxRetriesPerRequest: null });
+
+  constructor() {
+    watchErrors(this.client);
+  }
 
   async onModuleDestroy() {
     await this.client.quit();
@@ -38,4 +42,16 @@ export class RedisService implements OnModuleDestroy {
       });
     }
   }
+}
+
+const logger = new Logger('Redis');
+let lastLogged = 0;
+
+/** ioredis retries on its own; log a short line at most every 10s instead of a stack per attempt. */
+export function watchErrors(client: Redis) {
+  client.on('error', (e: Error & { code?: string }) => {
+    if (Date.now() - lastLogged < 10_000) return;
+    lastLogged = Date.now();
+    logger.error(`${e.code ?? e.message} at ${env.redisUrl.replace(/\/\/[^@]*@/, '//***@')} (is Redis running? npm run db:up)`);
+  });
 }

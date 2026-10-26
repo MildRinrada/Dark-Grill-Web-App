@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "predev": "node --env-file-if-exists=.env ../../scripts/free-port.mjs 4000 && node ../../scripts/dev-services.mjs",
     "dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main.js",

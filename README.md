@@ -20,6 +20,11 @@ npm run dev:api      # http://localhost:4000/api/v1
 npm run dev:web      # http://localhost:3000
 ```
 
+ก่อนเริ่ม dev server จะมีขั้นตอนตรวจให้อัตโนมัติ ([scripts/free-port.mjs](scripts/free-port.mjs), [scripts/dev-services.mjs](scripts/dev-services.mjs))
+- ถ้าพอร์ต 3000 หรือ 4000 ถูก dev server ตัวเก่าของโปรเจกต์นี้จับค้างอยู่ จะปิดตัวเก่าให้ แล้วเริ่มตัวใหม่
+- ถ้าเป็นโปรแกรมอื่นจับพอร์ตอยู่ จะไม่ไปปิดให้ แต่จะบอกชื่อโปรแกรมและ PID แล้วหยุด เพราะเว็บกับ API ผูกพอร์ตกันไว้ (CORS, `WEB_ORIGIN`, socket) ถ้าย้ายพอร์ตเองระบบจะพัง
+- `dev:api` จะเปิด Postgres/Redis ด้วย `docker compose up -d --wait` ก่อนทุกครั้ง ถ้า Docker Desktop ยังไม่ได้เปิด จะขึ้นข้อความบอก
+
 ตัว seed จะสร้าง 3 สาขา เมนู 22 รายการพร้อมตัวเลือก วัตถุดิบและสูตร (BOM) โปรโมชัน แคมเปญ พนักงานครบทุก role และออเดอร์ย้อนหลัง 60 วัน (ราว 5,900 ออเดอร์) เพื่อให้รายงาน, ระบบแนะนำสินค้า, menu engineering และการพยากรณ์มีข้อมูลจริงให้คำนวณ
 
 ### บัญชีทดลอง (เข้าสู่ระบบด้วย OTP)
@@ -105,6 +110,42 @@ e2e ครอบคลุม: ราคาคิดใหม่ที่ server 
 ภาพ hero แบบตัดพื้นมีขนาด 34 KB (budget 120 KB)
 
 ข้อยกเว้น: `/kiosk` (206 KB) และ `/kitchen` (199 KB) ยังใช้ motion เพราะเป็นอุปกรณ์ในร้านที่โหลดครั้งเดียวแล้วเปิดค้างไว้
+
+## Deploy เว็บขึ้น Vercel (API บน Render)
+
+Vercel รันหน้าเว็บ Next.js ได้เต็มที่ แต่รัน API ตัวนี้ไม่ได้ เพราะ Vercel Functions ไม่รองรับ WebSocket (Socket.IO) และไม่มี process ที่รันค้างไว้สำหรับ BullMQ จึงต้องแยก API ไปไว้ที่ที่รัน container ได้ ในที่นี้ใช้ Render เพราะมี blueprint พร้อมแล้ว ([render.yaml](render.yaml)) แต่ Dockerfile ตัวเดียวกันใช้กับ Railway หรือ Fly.io ได้ด้วย
+
+```text
+เบราว์เซอร์ ──> Vercel (Next.js, sin1)
+                 ├─ /api/v1, /uploads ──rewrite──> Render: darkgrill-api (Docker, Singapore)
+                 └─ Socket.IO ต่อตรงไปที่ API (rewrite ของ Vercel ส่งต่อ WebSocket ไม่ได้)
+                                                    ├─ Render Postgres
+                                                    └─ Render Key Value (Redis)
+```
+
+1. **API บน Render:** ไปที่ New > Blueprint แล้วเลือก repo นี้ Render จะสร้าง API, Postgres และ Key Value ให้ตาม `render.yaml` จากนั้นกรอกค่าที่ระบบถาม
+   - `WEB_ORIGIN`: URL ของ Vercel เช่น `https://darkgrill.vercel.app` ถ้ามีหลาย URL ให้คั่นด้วย comma
+   - `INTERNAL_API_KEY`: สุ่มสตริงยาวๆ ขึ้นมา 1 ค่า แล้วใช้ค่าเดียวกันนี้บน Vercel
+   - `S3_*`: ไม่บังคับ ถ้าไม่ใส่ รูปที่อัปโหลดจะหายเมื่อ service รีสตาร์ต
+2. **ใส่ข้อมูลตัวอย่าง:** คัดลอก External Database URL จากหน้า Postgres บน Render แล้วรัน
+   ```bash
+   DATABASE_URL="postgresql://..." npm run -w apps/api seed
+   ```
+   ตาราง (migration) API จะสร้างเองตอนบูต
+3. **เว็บบน Vercel:** ไปที่ Add New > Project แล้วเลือก repo นี้ ตั้ง **Root Directory = `apps/web`** (คำสั่ง install และ build อ่านจาก [apps/web/vercel.json](apps/web/vercel.json) ให้เอง) แล้วตั้ง Environment Variables
+   | ชื่อ | ค่า |
+   | --- | --- |
+   | `API_INTERNAL_URL` | `https://darkgrill-api.onrender.com` (URL ของ API บน Render) |
+   | `NEXT_PUBLIC_SOCKET_URL` | URL เดียวกับ `API_INTERNAL_URL` |
+   | `INTERNAL_API_KEY` | ค่าเดียวกับบน Render |
+
+   rewrite อ่าน `API_INTERNAL_URL` ตอน build ถ้าเปลี่ยน URL ของ API ต้อง Redeploy เว็บด้วย
+
+**ข้อควรรู้**
+- แพ็กเกจฟรีของ Render จะพักเครื่องเมื่อไม่มีคนใช้ประมาณ 15 นาที คนแรกที่เข้ามาหลังจากนั้นจะรอนานกว่าปกติ และงานตั้งเวลาของ BullMQ จะทำต่อเมื่อเครื่องตื่น ส่วน Postgres ฟรีของ Render มีอายุจำกัด (ดูเงื่อนไขในหน้า pricing ของ Render)
+- cookie login ยังเป็นของโดเมน Vercel เพราะ `/api/v1` วิ่งผ่าน rewrite ส่วน Socket.IO ส่ง token ในข้อความ subscribe จึงต่อข้ามโดเมนได้ (ได้เฉพาะ origin ที่อยู่ใน `WEB_ORIGIN`)
+- `DEV_MODE` เป็น `"true"` เพื่อใช้บัญชีทดลองได้ (มีความเสี่ยงเดียวกับที่อธิบายไว้ในหัวข้อ Cloudflare ด้านล่าง)
+- ทดสอบในเครื่องโดยจำลองขั้นตอนของ Vercel แล้ว: install/build ด้วยคำสั่งใน `vercel.json` บนโฟลเดอร์ที่ไม่มี `node_modules` → `next start` + API ใน Docker image → login, จอครัว realtime, kiosk จ่ายเงิน, อัปโหลดรูป และตัวย่อรูปผ่านทั้งหมด แต่ยังไม่ได้ deploy ขึ้น Vercel/Render จริง
 
 ## Deploy ขึ้น Cloudflare
 
